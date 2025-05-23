@@ -2,15 +2,29 @@ import streamlit as st
 from PIL import Image
 import numpy as np
 import os
-import tempfile
-import shutil
 import sys
-import traceback
+import time
+import asyncio
 import logging
+import tempfile
+import traceback
+from pathlib import Path
+from typing import Optional, Tuple, Dict, Any, Callable
 
-# Configure logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# Set up logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler('app.log')
+    ]
+)
 logger = logging.getLogger(__name__)
+
+# Fix for asyncio event loop on Windows
+if sys.platform == "win32" and hasattr(asyncio, "WindowsSelectorEventLoopPolicy"):
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 # Try to import torch first as it's a heavy dependency
 try:
@@ -48,14 +62,32 @@ def update_progress(progress, message):
     return
 
 def main():
-    # Configure page
-    st.set_page_config(
-        page_title="Neural Style Transfer",
-        page_icon="🎨",
-        layout="wide",
-        initial_sidebar_state="expanded"
-    )
-    
+    try:
+        # Set page config
+        st.set_page_config(
+            page_title="Neural Style Transfer",
+            page_icon="🎨",
+            layout="wide"
+        )
+        
+        # Set title and description
+        st.markdown("# Neural Style Transfer")
+        st.markdown("###### _by Umang Hirani_")
+        
+        # Initialize session state
+        if 'temp_dir' not in st.session_state:
+            st.session_state.temp_dir = create_temp_dir()
+            logger.info(f"Initialized temp dir: {st.session_state.temp_dir}")
+            
+        # Create output directory
+        output_dir = Path(st.session_state.temp_dir) / 'output'
+        output_dir.mkdir(exist_ok=True)
+        
+    except Exception as e:
+        logger.error(f"Error initializing app: {e}")
+        st.error(f"Failed to initialize the application: {str(e)}")
+        st.stop()
+
     # Initialize session state for progress tracking
     if 'processing' not in st.session_state:
         st.session_state.processing = False
@@ -107,23 +139,21 @@ def main():
     st.markdown("# Neural Style Transfer")
     st.markdown("###### _by Umang Hirani_")
 
-# Create temporary directory for processing
 @st.cache_resource
 def create_temp_dir() -> str:
-    """Create and return a temporary directory for storing uploaded files.
-    
-    Returns:
-        str: Path to the created temporary directory
-    """
-    temp_dir = os.path.join(tempfile.gettempdir(), 'nst_temp')
-    os.makedirs(temp_dir, exist_ok=True)
-    return temp_dir
+    """Create and return a temporary directory for storing uploaded files."""
+    try:
+        temp_dir = Path(tempfile.gettempdir()) / 'nst_temp'
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        logger.info(f"Using temporary directory: {temp_dir}")
+        return str(temp_dir)
+    except Exception as e:
+        logger.error(f"Error creating temp directory: {e}")
+        raise
 
-temp_dir = create_temp_dir()  # This will be cached by Streamlit
-
-def save_uploaded_file(uploaded_file, save_dir):
+def save_uploaded_file(uploaded_file, save_dir: str) -> Optional[str]:
     """
-    Save an uploaded file to the specified directory with validation.
+    Save an uploaded file to the specified directory with a unique filename.
     
     Args:
         uploaded_file: The file uploaded via Streamlit's file_uploader
@@ -133,43 +163,52 @@ def save_uploaded_file(uploaded_file, save_dir):
         str: Path to the saved file, or None if there was an error
     """
     try:
+        logger.info(f"Attempting to save uploaded file: {uploaded_file.name if uploaded_file else 'None'}")
+        
         # Validate input
         if uploaded_file is None:
             raise ValueError("No file was uploaded")
             
-        # Create save directory if it doesn't exist
-        os.makedirs(save_dir, exist_ok=True)
+        # Ensure save_dir exists
+        save_path = Path(save_dir)
+        save_path.mkdir(parents=True, exist_ok=True)
         
         # Sanitize filename
-        filename = os.path.basename(uploaded_file.name)
+        filename = Path(uploaded_file.name).name  # Get basename to prevent path traversal
         if not filename:
             raise ValueError("Invalid filename")
         
-        # Create full path and save file
-        file_path = os.path.join(save_dir, filename)
-        
-        # Check if file already exists and create a unique name if needed
+        # Create unique filename if needed
+        file_path = save_path / filename
         counter = 1
         base, ext = os.path.splitext(filename)
-        while os.path.exists(file_path):
-            file_path = os.path.join(save_dir, f"{base}_{counter}{ext}")
+        
+        while file_path.exists():
+            file_path = save_path / f"{base}_{counter}{ext}"
             counter += 1
+            if counter > 100:  # Prevent infinite loops
+                raise RuntimeError("Too many duplicate filenames")
         
         # Save the file
-        with open(file_path, "wb") as f:
-            f.write(uploaded_file.getbuffer())
+        try:
+            with open(file_path, "wb") as f:
+                f.write(uploaded_file.getbuffer())
+        except Exception as e:
+            logger.error(f"Error writing file {file_path}: {e}")
+            raise RuntimeError(f"Failed to save file: {e}")
         
         # Verify file was saved
-        if not os.path.exists(file_path):
-            raise IOError("Failed to save file")
-        
-        st.success(f"Successfully saved file: {os.path.basename(file_path)}")
+        if not file_path.exists():
+            raise RuntimeError("File was not saved correctly")
+            
+        file_path = str(file_path.resolve())
+        logger.info(f"Successfully saved file to: {file_path}")
+        st.toast(f"Saved: {filename}")
         return file_path
         
     except Exception as e:
-        error_msg = f"Error saving file: {str(e)}"
-        st.error(error_msg)
-        logger.error(error_msg, exc_info=True)
+        logger.error(f"Error in save_uploaded_file: {e}", exc_info=True)
+        st.error(f"Error saving file: {e}")
         return None
 
 def main():
@@ -324,5 +363,48 @@ def main():
         </div>
     """, unsafe_allow_html=True)
 
+def run_style_transfer(config, progress_callback=None):
+    """Run the style transfer with progress updates."""
+    try:
+        if progress_callback:
+            progress_callback(0, "Starting style transfer...")
+            
+        start_time = time.time()
+        results_path = neural_style_transfer(config, progress_callback=progress_callback)
+        end_time = time.time()
+        
+        duration = end_time - start_time
+        logger.info(f"Style transfer completed in {duration:.2f} seconds")
+        
+        if progress_callback:
+            progress_callback(100, f"Completed in {duration:.1f} seconds")
+            
+        return results_path
+        
+    except Exception as e:
+        logger.error(f"Error during style transfer: {e}", exc_info=True)
+        if progress_callback:
+            progress_callback(0, f"Error: {str(e)}")
+        raise
+
+def main_wrapper():
+    """Wrapper around main to catch and log all exceptions."""
+    try:
+        main()
+    except Exception as e:
+        logger.critical(f"Critical error in application: {e}", exc_info=True)
+        st.error("A critical error occurred. Please check the logs for more details.")
+        st.stop()
+
 if __name__ == "__main__":
-    main()
+    # Set up signal handling for clean exit
+    import signal
+    
+    def handle_sigint(signum, frame):
+        logger.info("Received interrupt signal. Exiting...")
+        sys.exit(0)
+        
+    signal.signal(signal.SIGINT, handle_sigint)
+    
+    # Run the application
+    main_wrapper()
