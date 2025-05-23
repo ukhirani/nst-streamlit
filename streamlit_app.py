@@ -107,14 +107,19 @@ def main():
     st.markdown("# Neural Style Transfer")
     st.markdown("###### _by Umang Hirani_")
 
-    # Create temporary directory for processing
-    @st.cache_resource
-    def create_temp_dir():
-        temp_dir = os.path.join(tempfile.gettempdir(), 'nst_temp')
-        os.makedirs(temp_dir, exist_ok=True)
-        return temp_dir
+# Create temporary directory for processing
+@st.cache_resource
+def create_temp_dir() -> str:
+    """Create and return a temporary directory for storing uploaded files.
+    
+    Returns:
+        str: Path to the created temporary directory
+    """
+    temp_dir = os.path.join(tempfile.gettempdir(), 'nst_temp')
+    os.makedirs(temp_dir, exist_ok=True)
+    return temp_dir
 
-    temp_dir = create_temp_dir()
+temp_dir = create_temp_dir()  # This will be cached by Streamlit
 
 def save_uploaded_file(uploaded_file, save_dir):
     """
