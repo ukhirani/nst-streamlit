@@ -1,6 +1,6 @@
 streamlit>=1.26.0
 matplotlib
 numpy
-opencv_python
+opencv-python-headless
 torch
 torchvision
