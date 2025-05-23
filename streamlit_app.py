@@ -397,14 +397,17 @@ def main_wrapper():
         st.stop()
 
 if __name__ == "__main__":
-    # Set up signal handling for clean exit
-    import signal
-    
-    def handle_sigint(signum, frame):
-        logger.info("Received interrupt signal. Exiting...")
-        sys.exit(0)
-        
-    signal.signal(signal.SIGINT, handle_sigint)
+    # Only set up signal handling on non-Windows platforms when not in Streamlit Cloud
+    if os.name != 'nt' and 'STREAMLIT_SERVER_RUNNING' not in os.environ:
+        try:
+            import signal
+            def handle_sigint(signum, frame):
+                logger.info("Received interrupt signal. Exiting...")
+                sys.exit(0)
+            signal.signal(signal.SIGINT, handle_sigint)
+            logger.info("Signal handlers set up")
+        except Exception as e:
+            logger.warning(f"Could not set up signal handlers: {e}")
     
     # Run the application
     main_wrapper()
