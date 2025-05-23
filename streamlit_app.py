@@ -62,6 +62,9 @@ def update_progress(progress, message):
     return
 
 def main():
+    # Initialize temp_dir at module level
+    global temp_dir
+    
     try:
         # Set page config
         st.set_page_config(
@@ -74,14 +77,27 @@ def main():
         st.markdown("# Neural Style Transfer")
         st.markdown("###### _by Umang Hirani_")
         
-        # Initialize session state
-        if 'temp_dir' not in st.session_state:
-            st.session_state.temp_dir = create_temp_dir()
-            logger.info(f"Initialized temp dir: {st.session_state.temp_dir}")
+        # Initialize temp directory
+        try:
+            temp_dir = create_temp_dir()
+            logger.info(f"Using temp directory: {temp_dir}")
             
-        # Create output directory
-        output_dir = Path(st.session_state.temp_dir) / 'output'
-        output_dir.mkdir(exist_ok=True)
+            # Create output directory
+            output_dir = Path(temp_dir) / 'output'
+            output_dir.mkdir(exist_ok=True, parents=True)
+            
+            # Verify we can write to the temp directory
+            test_file = output_dir / '.test_write'
+            test_file.touch()
+            test_file.unlink(missing_ok=True)
+            
+            # Store in session state for Streamlit
+            st.session_state.temp_dir = temp_dir
+            
+        except Exception as e:
+            logger.error(f"Failed to initialize temporary directory: {e}")
+            st.error(f"Failed to initialize temporary storage. Please check permissions and try again.")
+            st.stop()
         
     except Exception as e:
         logger.error(f"Error initializing app: {e}")
@@ -396,18 +412,33 @@ def main_wrapper():
         st.error("A critical error occurred. Please check the logs for more details.")
         st.stop()
 
-if __name__ == "__main__":
-    # Only set up signal handling on non-Windows platforms when not in Streamlit Cloud
-    if os.name != 'nt' and 'STREAMLIT_SERVER_RUNNING' not in os.environ:
-        try:
+def setup_signal_handlers():
+    """Set up signal handlers if running in a main thread and not in Streamlit Cloud."""
+    try:
+        import threading
+        if (threading.current_thread() is threading.main_thread() and 
+            'STREAMLIT_SERVER_RUNNING' not in os.environ and 
+            os.name != 'nt'):
+            
             import signal
             def handle_sigint(signum, frame):
                 logger.info("Received interrupt signal. Exiting...")
                 sys.exit(0)
+                
             signal.signal(signal.SIGINT, handle_sigint)
             logger.info("Signal handlers set up")
-        except Exception as e:
-            logger.warning(f"Could not set up signal handlers: {e}")
+            return True
+    except Exception as e:
+        logger.warning(f"Could not set up signal handlers: {e}")
+    return False
+
+if __name__ == "__main__":
+    # Set up signal handlers if possible
+    setup_signal_handlers()
     
     # Run the application
-    main_wrapper()
+    try:
+        main_wrapper()
+    except Exception as e:
+        logger.critical(f"Fatal error in application: {e}", exc_info=True)
+        sys.exit(1)
