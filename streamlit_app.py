@@ -39,15 +39,51 @@ except Exception as e:
     logger.error(f"Error importing NST module: {e}")
     raise
 
-# Set page config
-st.set_page_config(
-    page_title="Neural Style Transfer by Umang Hirani",
-    layout="wide",
-    initial_sidebar_state="collapsed"
-)
+# Progress callback function
+def update_progress(progress, message):
+    """Update the progress bar and status message."""
+    if 'progress_bar' in st.session_state and 'status_text' in st.session_state:
+        st.session_state.progress_bar.progress(progress)
+        st.session_state.status_text.text(message)
+    return
 
-# Custom CSS for better styling
-st.markdown("""
+def main():
+    # Configure page
+    st.set_page_config(
+        page_title="Neural Style Transfer",
+        page_icon="🎨",
+        layout="wide",
+        initial_sidebar_state="expanded"
+    )
+    
+    # Initialize session state for progress tracking
+    if 'processing' not in st.session_state:
+        st.session_state.processing = False
+        st.session_state.progress = 0
+        st.session_state.status = "Ready"
+    
+    # Add custom CSS for better styling
+    st.markdown(""" 
+    <style>
+    .stProgress > div > div > div > div {
+        background-color: #4CAF50;
+    }
+    .status-box {
+        padding: 1rem;
+        margin: 1rem 0;
+        border-radius: 0.5rem;
+        background-color: #f0f2f6;
+    }
+    .file-info {
+        font-size: 0.9rem;
+        color: #666;
+        margin-top: 0.5rem;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+    # Custom CSS for better styling
+    st.markdown("""
     <style>
     .stButton>button {
         width: 100%;
@@ -68,55 +104,73 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-st.markdown("# Neural Style Transfer")
-st.markdown("###### _by Umang Hirani_")
+    st.markdown("# Neural Style Transfer")
+    st.markdown("###### _by Umang Hirani_")
 
+    # Create temporary directory for processing
+    @st.cache_resource
+    def create_temp_dir():
+        temp_dir = os.path.join(tempfile.gettempdir(), 'nst_temp')
+        os.makedirs(temp_dir, exist_ok=True)
+        return temp_dir
 
-# Create temporary directory for processing
-@st.cache_resource
-def create_temp_dir():
-    temp_dir = os.path.join(tempfile.gettempdir(), 'nst_temp')
-    os.makedirs(temp_dir, exist_ok=True)
-    return temp_dir
+    temp_dir = create_temp_dir()
 
-temp_dir = create_temp_dir()
-
-# Function to save uploaded file to temp directory
-def save_uploaded_file(uploaded_file, filename):
-    file_path = os.path.join(temp_dir, filename)
-    with open(file_path, "wb") as f:
-        f.write(uploaded_file.getbuffer())
-    return file_path
+def save_uploaded_file(uploaded_file, save_dir):
+    """
+    Save an uploaded file to the specified directory with validation.
+    
+    Args:
+        uploaded_file: The file uploaded via Streamlit's file_uploader
+        save_dir: Directory to save the file to
+        
+    Returns:
+        str: Path to the saved file, or None if there was an error
+    """
+    try:
+        # Validate input
+        if uploaded_file is None:
+            raise ValueError("No file was uploaded")
+            
+        # Create save directory if it doesn't exist
+        os.makedirs(save_dir, exist_ok=True)
+        
+        # Sanitize filename
+        filename = os.path.basename(uploaded_file.name)
+        if not filename:
+            raise ValueError("Invalid filename")
+        
+        # Create full path and save file
+        file_path = os.path.join(save_dir, filename)
+        
+        # Check if file already exists and create a unique name if needed
+        counter = 1
+        base, ext = os.path.splitext(filename)
+        while os.path.exists(file_path):
+            file_path = os.path.join(save_dir, f"{base}_{counter}{ext}")
+            counter += 1
+        
+        # Save the file
+        with open(file_path, "wb") as f:
+            f.write(uploaded_file.getbuffer())
+        
+        # Verify file was saved
+        if not os.path.exists(file_path):
+            raise IOError("Failed to save file")
+        
+        st.success(f"Successfully saved file: {os.path.basename(file_path)}")
+        return file_path
+        
+    except Exception as e:
+        error_msg = f"Error saving file: {str(e)}"
+        st.error(error_msg)
+        logger.error(error_msg, exc_info=True)
+        return None
 
 def main():
-    logger.info("Starting Streamlit app")
-    
-    # Create a temporary directory for file operations
-    temp_dir = os.path.join(os.getcwd(), 'temp')
-    os.makedirs(temp_dir, exist_ok=True)
-    logger.info(f"Using temporary directory: {temp_dir}")
-    
+    # Main application code will go here
     try:
-        # Log system information
-        logger.info(f"Python version: {sys.version}")
-        logger.info(f"Working directory: {os.getcwd()}")
-        
-        # Check available memory
-        if hasattr(os, 'sysconf'):
-            if 'SC_PAGE_SIZE' in os.sysconf_names and 'SC_PHYS_PAGES' in os.sysconf_names:
-                page_size = os.sysconf('SC_PAGE_SIZE')
-                phys_pages = os.sysconf('SC_PHYS_PAGES')
-                total_memory = (page_size * phys_pages) / (1024 ** 3)  # Convert to GB
-                logger.info(f"Total system memory: {total_memory:.2f} GB")
-        
-        # Check disk space
-        total, used, free = shutil.disk_usage("/")
-        logger.info(f"Disk space - Total: {total // (2**30)} GB, Used: {used // (2**30)} GB, Free: {free // (2**30)} GB")
-        
-        # Main layout
-        st.title("Neural Style Transfer")
-        st.markdown("###### _by Umang Hirani_")
-        
+        # Create main columns
         col1, col2, col3 = st.columns([1, 1, 1])
         
         with col1:
@@ -161,105 +215,109 @@ def main():
             
             # Add a button to trigger style transfer
             if st.button("Apply Style Transfer", key="style_transfer_btn"):
-                if content_image is None or style_image is None:
+                if 'content_image' not in locals() or 'style_image' not in locals() or content_image is None or style_image is None:
                     st.error("Please upload both content and style images")
                 else:
                     try:
-                        st.write("Saving uploaded files...")
-                        # Save uploaded files
-                        content_path = save_uploaded_file(content_image, "content.jpg")
-                        style_path = save_uploaded_file(style_image, "style.jpg")
-                        st.write(f"Content image saved to: {content_path}")
-                        st.write(f"Style image saved to: {style_path}")
-                        
-                        # Create output directory
-                        output_dir = os.path.join(temp_dir, "output")
-                        os.makedirs(output_dir, exist_ok=True)
-                        st.write(f"Output directory: {output_dir}")
-                        
-                        # Prepare config
-                        config = {
-                            'content_img_name': "content.jpg",
-                            'style_img_name': "style.jpg",
-                            'content_images_dir': temp_dir,
-                            'style_images_dir': temp_dir,
-                            'output_img_dir': output_dir,
-                            'img_format': (4, '.jpg'),
-                            'height': height,
-                            'content_weight': content_weight,
-                            'style_weight': style_weight,
-                            'tv_weight': tv_weight
-                        }
-                        
-                        st.write("Starting style transfer...")
-                        st.json({"config": config})  # Show the config being used
-                        
-                        # Run style transfer with progress
-                        with st.spinner("Running style transfer... This may take a few minutes..."):
-                            import time
-                            start_time = time.time()
-                            results_path = neural_style_transfer(config)
-                            end_time = time.time()
-                            st.write(f"Style transfer completed in {end_time - start_time:.2f} seconds")
-                            st.write(f"Results saved to: {results_path}")
+                        with st.spinner("Processing images..."):
+                            # Create output directory
+                            output_dir = os.path.join(temp_dir, "output")
+                            os.makedirs(output_dir, exist_ok=True)
                             
-                            # Display result
-                            if results_path and os.path.exists(results_path):
-                                # Find the latest output image
-                                output_files = [f for f in os.listdir(results_path) if f.endswith('.jpg')]
-                                if output_files:
-                                    output_files.sort()
-                                    latest_output = os.path.join(results_path, output_files[-1])
-                                    output_image = Image.open(latest_output)
-                                    
-                                    # Display in the output column
-                                    with col3:
-                                        st.markdown("### Output Image")
-                                        st.image(output_image, use_container_width=True, caption="Stylized Output")
+                            # Save uploaded files
+                            content_path = save_uploaded_file(content_image, temp_dir)
+                            style_path = save_uploaded_file(style_image, temp_dir)
+                            
+                            if not content_path or not style_path:
+                                raise Exception("Failed to save one or more uploaded files")
+                            
+                            # Prepare config with actual filenames
+                            config = {
+                                'content_img_name': os.path.basename(content_path),
+                                'style_img_name': os.path.basename(style_path),
+                                'content_images_dir': os.path.dirname(content_path),
+                                'style_images_dir': os.path.dirname(style_path),
+                                'output_img_dir': output_dir,
+                                'img_format': (4, '.jpg'),
+                                'height': height,
+                                'content_weight': content_weight,
+                                'style_weight': style_weight,
+                                'tv_weight': tv_weight
+                            }
+                            
+                            logger.info(f"Using config: {config}")
+                            
+                            # Initialize progress bar and status
+                            progress_bar = st.progress(0)
+                            status_text = st.empty()
+                            
+                            # Store in session state for the callback
+                            st.session_state.progress_bar = progress_bar
+                            st.session_state.status_text = status_text
+                            
+                            # Run style transfer
+                            status_text.text("Starting style transfer...")
+                            
+                            def progress_callback(progress, message):
+                                progress_bar.progress(progress)
+                                status_text.text(message)
+                            
+                            try:
+                                start_time = time.time()
+                                results_path = neural_style_transfer(config, progress_callback=progress_callback)
+                                end_time = time.time()
+                                
+                                progress_bar.progress(100)
+                                status_text.text(f"Style transfer completed in {end_time - start_time:.2f} seconds")
+                                
+                                # Display result
+                                if results_path and os.path.exists(results_path):
+                                    output_files = [f for f in os.listdir(results_path) if f.endswith('.jpg')]
+                                    if output_files:
+                                        output_files.sort()
+                                        latest_output = os.path.join(results_path, output_files[-1])
+                                        output_image = Image.open(latest_output)
+                                        
+                                        # Display in the output column
+                                        col3.markdown("### Output Image")
+                                        col3.image(output_image, use_column_width=True, caption="Stylized Output")
                                         
                                         # Add download button
                                         with open(latest_output, "rb") as file:
-                                            st.download_button(
+                                            col3.download_button(
                                                 label="Download Image",
                                                 data=file,
-                                                file_name=f"stylized_{os.path.basename(content_image.name)}",
+                                                file_name=f"stylized_{os.path.basename(content_path)}",
                                                 mime="image/jpg"
                                             )
-                            else:
-                                st.error("Style transfer completed but no output was generated.")
+                                else:
+                                    st.error("Style transfer completed but no output was generated.")
+                                    
+                            except Exception as e:
+                                logger.error(f"Error during style transfer: {e}")
+                                logger.error(traceback.format_exc())
+                                st.error("An error occurred during style transfer:")
+                                st.code(traceback.format_exc())
+                                st.error(f"Error details: {str(e)}")
                             
                     except Exception as e:
-                        import traceback
-                        logger.error(f"Error during style transfer: {e}")
+                        logger.error(f"Error processing images: {e}")
                         logger.error(traceback.format_exc())
-                        st.error("An error occurred during style transfer:")
-                        st.code(traceback.format_exc())
-                        st.error(f"Error details: {str(e)}")
-            
-            # Display output image if it exists
-            if 'output_image' in locals():
-                st.markdown("### Output Image")
-                st.image(output_image, use_container_width=True, caption="Stylized Output")
-
+                        st.error(f"An error occurred while processing images: {str(e)}")
+                        
     except Exception as e:
-        logger.error(f"Unexpected error in main: {e}")
+        logger.error(f"Unexpected error: {e}")
         logger.error(traceback.format_exc())
-        st.error(f"An unexpected error occurred: {e}")
+        st.error(f"An unexpected error occurred: {str(e)}")
         st.code(traceback.format_exc())
-    finally:
-        # Add some spacing  
-        st.markdown("<br><br>", unsafe_allow_html=True)
-        
-        # Add a footer
-        st.markdown("---")
-        st.markdown("""
-            <div style='text-align: center; color: gray; font-size: 0.8em;'>
-                <p>Neural Style Transfer App | Created with ❤️ by Umang Hirani</p>
-            </div>
-        """, unsafe_allow_html=True)
+    
+    # Add footer
+    st.markdown("---")
+    st.markdown("""
+        <div style='text-align: center; color: gray; font-size: 0.8em;'>
+            <p>Neural Style Transfer App | Created with ❤️ by Umang Hirani</p>
+        </div>
+    """, unsafe_allow_html=True)
 
 if __name__ == "__main__":
     main()
-
-
-

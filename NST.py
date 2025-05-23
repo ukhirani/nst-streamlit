@@ -6,40 +6,77 @@ from torch.autograd import Variable
 from torch.optim import LBFGS
 import os
 from models.definitions.vgg19 import Vgg19
+import logging
+
+# Set up logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 IMAGENET_MEAN_255 = [123.675, 116.28, 103.53]
 IMAGENET_STD_NEUTRAL = [1, 1, 1]
 
-def load_image(img_path,target_shape="None"):
-    '''
-    Load and resize the image.
-    '''
-    if not os.path.exists(img_path):
-        raise Exception(f'Path not found: {img_path}')
-    img = cv.imread(img_path)[:, :, ::-1]                   # convert BGR to RGB when reading
-    if target_shape is not None:
-        if isinstance(target_shape, int) and target_shape != -1:
-            current_height, current_width = img.shape[:2]
-            new_height = target_shape
-            new_width = int(current_width * (new_height / current_height))
-            img = cv.resize(img, (new_width, new_height), interpolation=cv.INTER_CUBIC)
-        else:
-            img = cv.resize(img, (target_shape[1], target_shape[0]), interpolation=cv.INTER_CUBIC)
-    img = img.astype(np.float32)
-    img /= 255.0
-    return img
+def load_image(img_path, target_shape=None):
+    """Load an image from disk with error handling and validation."""
+    try:
+        if not os.path.exists(img_path):
+            raise FileNotFoundError(f'Image file not found: {img_path}')
+            
+        # Read image
+        img = cv2.imread(img_path, flags=cv2.IMREAD_COLOR)
+        if img is None:
+            raise ValueError(f'Failed to load image: {img_path}. The file may be corrupted or in an unsupported format.')
+            
+        # Convert color space
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        
+        # Resize if target shape is provided
+        if target_shape is not None:
+            if isinstance(target_shape, int):
+                current_height, current_width = img.shape[0], img.shape[1]
+                if current_height == 0 or current_width == 0:
+                    raise ValueError(f'Invalid image dimensions: {current_width}x{current_height}')
+                    
+                ratio = target_shape / current_height
+                target_width = int(current_width * ratio)
+                
+                if target_width <= 0 or target_shape <= 0:
+                    raise ValueError(f'Invalid target dimensions: {target_width}x{target_shape}')
+                    
+                img = cv2.resize(img, (target_width, target_shape), interpolation=cv2.INTER_CUBIC)
+            else:
+                img = cv2.resize(img, (target_shape[1], target_shape[0]), interpolation=cv2.INTER_CUBIC)
+        
+        # Convert to float32 and normalize
+        img = img.astype(np.float32)
+        img /= 255.0
+        
+        return img
+        
+    except Exception as e:
+        logger.error(f'Error loading image {img_path}: {str(e)}')
+        raise
 
 def prepare_img(img_path, target_shape, device):
-    '''
-    Normalize the image.
-    '''
-    img = load_image(img_path, target_shape=target_shape)
-    transform = transforms.Compose([
-        transforms.ToTensor(),
-        transforms.Lambda(lambda x: x.mul(255)),
-        transforms.Normalize(mean=IMAGENET_MEAN_255, std=IMAGENET_STD_NEUTRAL)])
-    img = transform(img).to(device).unsqueeze(0)
-    return img
+    """Prepare image for processing with validation."""
+    try:
+        logger.info(f'Preparing image: {img_path} (target height: {target_shape})')
+        
+        # Load and validate image
+        img = load_image(img_path, target_shape=target_shape)
+        
+        if img is None or img.size == 0:
+            raise ValueError('Loaded image is empty')
+            
+        # Convert to tensor and add batch dimension
+        img_tensor = torch.from_numpy(img).permute(2, 0, 1).to(device)
+        img_tensor = img_tensor.unsqueeze(0)
+        
+        logger.info(f'Image prepared successfully. Shape: {img_tensor.shape}, Device: {img_tensor.device}')
+        return img_tensor
+        
+    except Exception as e:
+        logger.error(f'Error preparing image {img_path}: {str(e)}')
+        raise
 
 def save_image(img, img_path):
     if len(img.shape) == 2:
@@ -143,12 +180,22 @@ def make_tuning_step(neural_net, optimizer, target_representations, content_feat
         return total_loss, content_loss, style_loss, tv_loss
     return tuning_step
 
-def neural_style_transfer(config):
+def neural_style_transfer(config, progress_callback=None):
     '''
     The main Neural Style Transfer method.
+    
+    Args:
+        config (dict): Configuration dictionary containing paths and parameters
+        progress_callback (callable, optional): Callback function for progress updates
+        
+    Returns:
+        str: Path to the directory containing the output images
     '''
-    print("Starting neural style transfer...")
-    print(f"Config: {config}")
+    logger.info("Starting neural style transfer...")
+    logger.info(f"Configuration: {config}")
+    
+    if progress_callback:
+        progress_callback(0, "Initializing style transfer...")
     
     try:
         # Prepare paths
