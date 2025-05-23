@@ -96,12 +96,12 @@ def main():
     with col1:
         content_file = st.file_uploader('Upload Content Image', type=['png', 'jpg', 'jpeg'])
         if content_file:
-            st.image(content_file, caption='Content Image', use_column_width=True)
+            st.image(content_file, caption='Content Image', use_container_width=True)
     
     with col2:
         style_file = st.file_uploader('Upload Style Image', type=['png', 'jpg', 'jpeg'])
         if style_file:
-            st.image(style_file, caption='Style Image', use_column_width=True)
+            st.image(style_file, caption='Style Image', use_container_width=True)
 
     # Parameters
     st.sidebar.header('Parameters')
@@ -184,7 +184,7 @@ def main():
                         
                         # Update output image
                         current_img = process_image(optimizing_img)
-                        output_image.image(current_img, caption=f'Output - Iteration {n_iter[0]}')
+                        output_image.image(current_img, caption=f'Output - Iteration {n_iter[0]}', use_container_width=True)
                 
                 n_iter[0] += 1
                 return total_loss
