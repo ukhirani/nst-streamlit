@@ -80,6 +80,12 @@ def prepare_model(device):
     '''
     Load VGG19 model into local cache.
     '''
+    # Suppress deprecation warnings for torchvision models
+    import warnings
+    warnings.filterwarnings("ignore", category=UserWarning, message='The parameter "pretrained" is deprecated')
+    warnings.filterwarnings("ignore", category=UserWarning, message='Arguments other than a weight enum')
+    
+    # Initialize model with weights
     model = Vgg19(requires_grad=False, show_progress=True)
     content_feature_maps_index = model.content_feature_maps_index
     style_feature_maps_indices = model.style_feature_maps_indices

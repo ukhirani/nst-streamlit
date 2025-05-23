@@ -65,14 +65,14 @@ with col1:
     content_image = st.file_uploader("Upload Content Image", type=['png', 'jpg', 'jpeg'], key='content_image')
     if content_image is not None:
         image = Image.open(content_image)
-        st.image(image, use_column_width=True, caption="Content Image")
+        st.image(image, use_container_width=True, caption="Content Image")
 
 with col2:
     st.markdown("### Style Image")
     style_image = st.file_uploader("Upload Style Image", type=['png', 'jpg', 'jpeg'], key='style_image')
     if style_image is not None:
         image = Image.open(style_image)
-        st.image(image, use_column_width=True, caption="Style Image")
+        st.image(image, use_container_width=True, caption="Style Image")
 
 with col3:
     st.markdown("### Parameters")
@@ -119,8 +119,9 @@ with col3:
                         'tv_weight': tv_weight
                     }
                     
-                    # Run style transfer
-                    results_path = neural_style_transfer(config)
+                    # Run style transfer with progress
+                    with st.spinner("Running style transfer... This may take a few minutes..."):
+                        results_path = neural_style_transfer(config)
                     
                     # Display result
                     if results_path and os.path.exists(results_path):
@@ -134,7 +135,7 @@ with col3:
                             # Display in the output column
                             with col3:
                                 st.markdown("### Output Image")
-                                st.image(output_image, use_column_width=True, caption="Stylized Output")
+                                st.image(output_image, use_container_width=True, caption="Stylized Output")
                                 
                                 # Add download button
                                 with open(latest_output, "rb") as file:
@@ -151,9 +152,9 @@ with col3:
     # Display output image if it exists
     if 'output_image' in locals():
         st.markdown("### Output Image")
-        st.image(output_image, use_column_width=True, caption="Stylized Output")
+        st.image(output_image, use_container_width=True, caption="Stylized Output")
 
-# Add some spacing
+# Add some spacing  
 st.markdown("<br><br>", unsafe_allow_html=True)
 
 # Add a footer
