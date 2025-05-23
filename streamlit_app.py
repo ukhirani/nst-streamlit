@@ -95,33 +95,44 @@ with col3:
         if content_image is None or style_image is None:
             st.error("Please upload both content and style images")
         else:
-            with st.spinner("Applying style transfer... This may take a few minutes..."):
-                try:
-                    # Save uploaded files
-                    content_path = save_uploaded_file(content_image, "content.jpg")
-                    style_path = save_uploaded_file(style_image, "style.jpg")
-                    
-                    # Create output directory
-                    output_dir = os.path.join(temp_dir, "output")
-                    os.makedirs(output_dir, exist_ok=True)
-                    
-                    # Prepare config
-                    config = {
-                        'content_img_name': "content.jpg",
-                        'style_img_name': "style.jpg",
-                        'content_images_dir': temp_dir,
-                        'style_images_dir': temp_dir,
-                        'output_img_dir': output_dir,
-                        'img_format': (4, '.jpg'),
-                        'height': height,
-                        'content_weight': content_weight,
-                        'style_weight': style_weight,
-                        'tv_weight': tv_weight
-                    }
-                    
-                    # Run style transfer with progress
-                    with st.spinner("Running style transfer... This may take a few minutes..."):
-                        results_path = neural_style_transfer(config)
+            try:
+                st.write("Saving uploaded files...")
+                # Save uploaded files
+                content_path = save_uploaded_file(content_image, "content.jpg")
+                style_path = save_uploaded_file(style_image, "style.jpg")
+                st.write(f"Content image saved to: {content_path}")
+                st.write(f"Style image saved to: {style_path}")
+                
+                # Create output directory
+                output_dir = os.path.join(temp_dir, "output")
+                os.makedirs(output_dir, exist_ok=True)
+                st.write(f"Output directory: {output_dir}")
+                
+                # Prepare config
+                config = {
+                    'content_img_name': "content.jpg",
+                    'style_img_name': "style.jpg",
+                    'content_images_dir': temp_dir,
+                    'style_images_dir': temp_dir,
+                    'output_img_dir': output_dir,
+                    'img_format': (4, '.jpg'),
+                    'height': height,
+                    'content_weight': content_weight,
+                    'style_weight': style_weight,
+                    'tv_weight': tv_weight
+                }
+                
+                st.write("Starting style transfer...")
+                st.json({"config": config})  # Show the config being used
+                
+                # Run style transfer with progress
+                with st.spinner("Running style transfer... This may take a few minutes..."):
+                    import time
+                    start_time = time.time()
+                    results_path = neural_style_transfer(config)
+                    end_time = time.time()
+                    st.write(f"Style transfer completed in {end_time - start_time:.2f} seconds")
+                    st.write(f"Results saved to: {results_path}")
                     
                     # Display result
                     if results_path and os.path.exists(results_path):
@@ -139,15 +150,20 @@ with col3:
                                 
                                 # Add download button
                                 with open(latest_output, "rb") as file:
-                                    btn = st.download_button(
+                                    st.download_button(
                                         label="Download Image",
                                         data=file,
                                         file_name=f"stylized_{os.path.basename(content_image.name)}",
                                         mime="image/jpg"
                                     )
+                    else:
+                        st.error("Style transfer completed but no output was generated.")
                     
-                except Exception as e:
-                    st.error(f"An error occurred: {str(e)}")
+            except Exception as e:
+                import traceback
+                st.error("An error occurred during style transfer:")
+                st.code(traceback.format_exc())
+                st.error(f"Error details: {str(e)}")
     
     # Display output image if it exists
     if 'output_image' in locals():

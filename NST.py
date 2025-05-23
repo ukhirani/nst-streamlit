@@ -147,44 +147,121 @@ def neural_style_transfer(config):
     '''
     The main Neural Style Transfer method.
     '''
-    content_img_path = os.path.join(config['content_images_dir'], config['content_img_name'])
-    style_img_path = os.path.join(config['style_images_dir'], config['style_img_name'])
-    out_dir_name = 'combined_' + os.path.split(content_img_path)[1].split('.')[0] + '_' + os.path.split(style_img_path)[1].split('.')[0]
-    dump_path = os.path.join(config['output_img_dir'], out_dir_name)
-    os.makedirs(dump_path, exist_ok=True)
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    content_img = prepare_img(content_img_path, config['height'], device)
-    style_img = prepare_img(style_img_path, config['height'], device)
+    print("Starting neural style transfer...")
+    print(f"Config: {config}")
     
-    init_img = content_img
-    
-    optimizing_img = Variable(init_img, requires_grad=True)
-    neural_net, content_feature_maps_index_name, style_feature_maps_indices_names = prepare_model(device)
-    print(f'Using VGG19 in the optimization procedure.')
-    content_img_set_of_feature_maps = neural_net(content_img)
-    style_img_set_of_feature_maps = neural_net(style_img)
-    target_content_representation = content_img_set_of_feature_maps[content_feature_maps_index_name[0]].squeeze(axis=0)
-    target_style_representation = [gram_matrix(x) for cnt, x in enumerate(style_img_set_of_feature_maps) if cnt in style_feature_maps_indices_names[0]]
-    target_representations = [target_content_representation, target_style_representation]
-    num_of_iterations = 1000
-    
-    optimizer = LBFGS((optimizing_img,), max_iter=num_of_iterations, line_search_fn='strong_wolfe')
-    cnt = 0
+    try:
+        # Prepare paths
+        content_img_path = os.path.join(config['content_images_dir'], config['content_img_name'])
+        style_img_path = os.path.join(config['style_images_dir'], config['style_img_name'])
+        out_dir_name = 'combined_' + os.path.split(content_img_path)[1].split('.')[0] + '_' + os.path.split(style_img_path)[1].split('.')[0]
+        dump_path = os.path.join(config['output_img_dir'], out_dir_name)
+        
+        print(f"Content image path: {content_img_path}")
+        print(f"Style image path: {style_img_path}")
+        print(f"Output directory: {dump_path}")
+        
+        # Create output directory
+        os.makedirs(dump_path, exist_ok=True)
+        print(f"Created output directory: {os.path.exists(dump_path)}")
+        
+        # Set device
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        print(f"Using device: {device}")
+        
+        # Prepare images
+        print("Preparing content and style images...")
+        content_img = prepare_img(content_img_path, config['height'], device)
+        style_img = prepare_img(style_img_path, config['height'], device)
+        print(f"Content image shape: {content_img.shape}")
+        print(f"Style image shape: {style_img.shape}")
+        
+        # Initialize with content image
+        init_img = content_img
+        optimizing_img = Variable(init_img, requires_grad=True)
+        
+        # Prepare model
+        print("Preparing VGG19 model...")
+        neural_net, content_feature_maps_index_name, style_feature_maps_indices_names = prepare_model(device)
+        print(f'Using VGG19 in the optimization procedure.')
+        
+        # Get feature maps
+        print("Extracting feature maps...")
+        content_img_set_of_feature_maps = neural_net(content_img)
+        style_img_set_of_feature_maps = neural_net(style_img)
+        
+        # Get target representations
+        target_content_representation = content_img_set_of_feature_maps[content_feature_maps_index_name[0]].squeeze(axis=0)
+        target_style_representation = [gram_matrix(x) for cnt, x in enumerate(style_img_set_of_feature_maps) if cnt in style_feature_maps_indices_names[0]]
+        target_representations = [target_content_representation, target_style_representation]
+        
+        # Set up optimization
+        num_of_iterations = 1000
+        print(f"Starting optimization with {num_of_iterations} iterations...")
+        
+        optimizer = LBFGS((optimizing_img,), max_iter=num_of_iterations, line_search_fn='strong_wolfe')
+        cnt = 0
 
-    def closure():
-        nonlocal cnt
-        if torch.is_grad_enabled():
-            optimizer.zero_grad()
-        total_loss, content_loss, style_loss, tv_loss = build_loss(neural_net, optimizing_img, target_representations, content_feature_maps_index_name[0], style_feature_maps_indices_names[0], config)
-        if total_loss.requires_grad:
-            total_loss.backward()
-        with torch.no_grad():
-            print(f'L-BFGS | iteration: {cnt:03}, total loss={total_loss.item():12.4f}, content_loss={config["content_weight"] * content_loss.item():12.4f}, style loss={config["style_weight"] * style_loss.item():12.4f}, tv loss={config["tv_weight"] * tv_loss.item():12.4f}')
-            save_and_maybe_display(optimizing_img, dump_path, config, cnt, num_of_iterations)
-        cnt += 1
-        return total_loss
-    optimizer.step(closure)
-    return dump_path
+        def closure():
+            nonlocal cnt
+            if torch.is_grad_enabled():
+                optimizer.zero_grad()
+                
+            # Calculate losses
+            total_loss, content_loss, style_loss, tv_loss = build_loss(
+                neural_net, 
+                optimizing_img, 
+                target_representations, 
+                content_feature_maps_index_name[0], 
+                style_feature_maps_indices_names[0], 
+                config
+            )
+            
+            # Backpropagate
+            if total_loss.requires_grad:
+                total_loss.backward()
+                
+            # Log progress
+            if cnt % 10 == 0:  # Print every 10 iterations
+                print(f'Iteration: {cnt:03}, Total Loss: {total_loss.item():.2f}, ' 
+                      f'Content: {config["content_weight"] * content_loss.item():.2f}, '
+                      f'Style: {config["style_weight"] * style_loss.item():.2f}, '
+                      f'TV: {config["tv_weight"] * tv_loss.item():.2f}')
+                
+                # Save intermediate results
+                save_and_maybe_display(
+                    optimizing_img, 
+                    dump_path, 
+                    config, 
+                    cnt, 
+                    num_of_iterations
+                )
+                
+            cnt += 1
+            return total_loss
+            
+        # Run optimization
+        print("Starting optimization...")
+        optimizer.step(closure)
+        print("Optimization completed!")
+        
+        # Save final result
+        save_and_maybe_display(
+            optimizing_img, 
+            dump_path, 
+            config, 
+            num_of_iterations-1,  # Save as final iteration
+            num_of_iterations
+        )
+        
+        print(f"Style transfer completed successfully! Results saved to: {dump_path}")
+        return dump_path
+        
+    except Exception as e:
+        import traceback
+        print("Error in neural_style_transfer:")
+        print(traceback.format_exc())
+        raise e
 
 if __name__ == "__main__":
     # Default configuration for when this file is run directly
